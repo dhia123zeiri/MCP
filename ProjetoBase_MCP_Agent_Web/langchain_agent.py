@@ -11,7 +11,7 @@ from pydantic import BaseModel
 # LangChain & LangGraph
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
-from langgraph.prebuilt import create_react_agent
+from langgraph.prebuilt import create_react_agent, ToolNode   # ← added ToolNode
 from langgraph.checkpoint.memory import InMemorySaver
 
 # MCP Adapters
@@ -59,7 +59,6 @@ class ChatResponse(BaseModel):
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 def extract_text(content) -> str:
-    """Safely extract plain text from various LangChain message content formats."""
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -72,11 +71,73 @@ def extract_text(content) -> str:
     return str(content)
 
 
+def is_invalid_chat_history_error(e: Exception) -> bool:
+    msg = str(e)
+    return (
+        "INVALID_CHAT_HISTORY" in msg
+        or "do not have a corresponding ToolMessage" in msg
+    )
+
+
+async def run_agent(message: str) -> str:
+    global thread_config
+
+    inputs = {"messages": [HumanMessage(content=message)]}
+
+    try:
+        return await _stream_agent(inputs)
+
+    except Exception as e:
+        if is_invalid_chat_history_error(e):
+            print(
+                f"\n⚠️  INVALID_CHAT_HISTORY detected — resetting thread and retrying.\n"
+                f"   Old thread: {thread_config['configurable']['thread_id']}"
+            )
+            thread_config = new_thread_config()
+            print(f"   New thread: {thread_config['configurable']['thread_id']}")
+            try:
+                return await _stream_agent(inputs)
+            except Exception as retry_exc:
+                traceback.print_exc()
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Agent error after thread reset: {str(retry_exc)}"
+                )
+        else:
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")
+
+
+async def _stream_agent(inputs: dict) -> str:
+    final_response = ""
+
+    async for event in agent.astream(
+        inputs,
+        config=thread_config,
+        stream_mode="values",
+    ):
+        msg = event["messages"][-1]
+
+        if msg.type == "ai" and msg.tool_calls:
+            for call in msg.tool_calls:
+                print(f"\n🔧 TOOL CALL : {call['name']}")
+                print(f"   Args      : {call['args']}")
+
+        elif msg.type == "tool":
+            is_error = getattr(msg, "status", None) == "error"
+            icon = "❌" if is_error else "✅"
+            print(f"\n{icon} TOOL RESULT [{msg.name}]: {msg.content}")
+
+        elif msg.type == "ai" and msg.content:
+            final_response = extract_text(msg.content)
+            print(f"\n💬 AI: {final_response}")
+
+    return final_response
+
+
 async def load_system_prompt(session: ClientSession) -> str:
-    """Load the MCP prompt and inject resource context into the system instruction."""
     system = ""
 
-    # 1. Load the MCP prompt template
     try:
         prompt_data = await session.get_prompt(
             "health_advisor_prompt",
@@ -92,9 +153,6 @@ async def load_system_prompt(session: ClientSession) -> str:
             "Always confirm before performing any create, update, or delete operations."
         )
 
-    # 2. Discover and inject all resources dynamically.
-    # Uses URIs returned by list_resources() to avoid hardcoding issues
-    # (Spring Boot MCP library appends a trailing slash to file:// URIs).
     try:
         resources_list = await session.list_resources()
         for res in resources_list.resources:
@@ -125,24 +183,31 @@ async def lifespan(app: FastAPI):
             await session.initialize()
             print("✅ MCP session initialized.")
 
-            # Load system prompt (with resources injected)
             system_instruction = await load_system_prompt(session)
 
-            # Load tools from MCP server
             tools = await load_mcp_tools(session)
             tool_names = [t.name for t in tools]
             print(f"✅ Tools loaded ({len(tools)}): {tool_names}")
 
-            # Build the LangGraph ReAct agent
+            # ── KEY FIX ───────────────────────────────────────────────────────
+            # langchain_mcp_adapters raises ToolException for every isError=true
+            # result from the Java MCP server. In newer LangGraph versions,
+            # handle_tool_errors was removed from create_react_agent and moved
+            # to ToolNode. Passing ToolNode(handle_tool_errors=True) means
+            # LangGraph catches ToolException and wraps it in a proper
+            # ToolMessage, keeping the chat history valid and letting the agent
+            # relay the error message conversationally instead of crashing.
+            tool_node = ToolNode(tools, handle_tool_errors=True)
+
             agent = create_react_agent(
                 model=llm,
-                tools=tools,
+                tools=tool_node,        # ← pass ToolNode, not raw list
                 prompt=system_instruction,
                 checkpointer=memory,
             )
             print("✅ Agent ready.\n")
 
-            yield  # Server is running — SSE session stays alive
+            yield
 
     print("🛑 MCP session closed. Shutting down.")
 
@@ -167,46 +232,20 @@ app.add_middleware(
 # ── ROUTES ────────────────────────────────────────────────────────────────────
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
-    """Send a message to the agent and receive a reply."""
     if agent is None:
         raise HTTPException(status_code=503, detail="Agent not yet initialized.")
-
-    try:
-        inputs = {"messages": [HumanMessage(content=req.message)]}
-        final_response = ""
-
-        async for event in agent.astream(
-            inputs,
-            config=thread_config,
-            stream_mode="values",
-        ):
-            msg = event["messages"][-1]
-
-            if msg.type == "ai" and msg.tool_calls:
-                for call in msg.tool_calls:
-                    print(f"\n🔧 TOOL CALL : {call['name']}")
-                    print(f"   Args      : {call['args']}")
-
-            elif msg.type == "tool":
-                print(f"\n✅ TOOL RESULT [{msg.name}]: {msg.content}")
-
-            elif msg.type == "ai" and msg.content:
-                final_response = extract_text(msg.content)
-                print(f"\n💬 AI: {final_response}")
-
-        return ChatResponse(reply=final_response)
-
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")
+    reply = await run_agent(req.message)
+    return ChatResponse(reply=reply)
 
 
 @app.post("/reset")
 async def reset():
-    """Clear conversation memory by switching to a new thread."""
     global thread_config
     thread_config = new_thread_config()
-    return {"status": "Conversation history cleared.", "thread_id": thread_config["configurable"]["thread_id"]}
+    return {
+        "status": "Conversation history cleared.",
+        "thread_id": thread_config["configurable"]["thread_id"]
+    }
 
 
 @app.get("/health")
@@ -220,7 +259,6 @@ async def health():
 
 @app.get("/tools")
 async def list_tools():
-    """List the tool names loaded from the MCP server (for debugging)."""
     if agent is None:
         raise HTTPException(status_code=503, detail="Agent not ready.")
     tool_names = [t.name for t in agent.tools] if hasattr(agent, "tools") else []
