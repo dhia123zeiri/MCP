@@ -59,5 +59,6 @@ application-prod.yml
 *.iml
 *.ipr
 out/
+.venv
 
 # IDE - Eclipse
