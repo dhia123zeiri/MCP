@@ -1,0 +1,5 @@
+./mvnw clean package
+./mvnw spring-boot:run
+
+py -m venv .venv 
+.\.venv\Scripts\Activate.ps1

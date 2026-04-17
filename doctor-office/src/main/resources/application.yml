@@ -1,16 +1,32 @@
 server:
   port: 8080
 
+# spring:
+#   application:
+#     name: "DoctorOffice"
+#   datasource:
+#     url: jdbc:postgresql://localhost:5433/doctor_office
+#     username: postgres
+#     password: dhia
+#     driver-class-name: org.postgresql.Driver
+#   jpa:
+#     database-platform: org.hibernate.dialect.PostgreSQLDialect
+#     hibernate:
+#       ddl-auto: update
+#     show-sql: true
 spring:
-  application:
-    name: "DoctorOffice"
   datasource:
-    url: jdbc:postgresql://localhost:5433/doctor_office
-    username: postgres
-    password: dhia
-    driver-class-name: org.postgresql.Driver
+    url: jdbc:sqlite:database.db
+    driver-class-name: org.sqlite.JDBC
+    # SQLite doesn't strictly need a username/password, but Spring might expect these fields
+    username: sa
+    password: sa
   jpa:
-    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    open-in-view: false
+    database-platform: org.hibernate.community.dialect.SQLiteDialect
+    properties:
+      hibernate:
+        dialect: org.hibernate.community.dialect.SQLiteDialect
     hibernate:
       ddl-auto: update
     show-sql: true
