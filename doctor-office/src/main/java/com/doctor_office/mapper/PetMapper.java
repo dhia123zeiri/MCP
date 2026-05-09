@@ -10,21 +10,28 @@ import javax.print.Doc;
 public class PetMapper {
     public static PetDto mapToPetDto(Pet pet, PetDto petDto) {
         petDto.setName(pet.getName());
-        petDto.setSpecies(pet.getSpecies());
+        if (pet.getPetType() != null) {
+            petDto.setSpecies(pet.getPetType().getSpecies());
+            petDto.setBreed(pet.getPetType().getBreed());
+            petDto.setPrice(pet.getPetType().getPrice());
+        }
         petDto.setAge(pet.getAge());
         petDto.setWeight(pet.getWeight());
         petDto.setMedicalHistory(pet.getMedicalHistory());
-        petDto.setBreed(pet.getBreed());
         return petDto;
     }
 
     public static Pet mapToPet(PetDto petDto, Pet pet) {
         pet.setName(petDto.getName());
-        pet.setSpecies(petDto.getSpecies());
+        if (pet.getPetType() == null) {
+            pet.setPetType(new com.doctor_office.entity.PetType());
+        }
+        pet.getPetType().setSpecies(petDto.getSpecies());
+        pet.getPetType().setBreed(petDto.getBreed());
+        pet.getPetType().setPrice(petDto.getPrice());
         pet.setAge(petDto.getAge());
         pet.setWeight(petDto.getWeight());
         pet.setMedicalHistory(petDto.getMedicalHistory());
-        pet.setBreed(petDto.getBreed());
         return pet;
     }
 

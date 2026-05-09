@@ -15,10 +15,13 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
-@AllArgsConstructor
 public class PetServiceImpl implements IPetService {
 
     private PetRepository petRepository;
+
+    public PetServiceImpl(PetRepository petRepository) {
+        this.petRepository = petRepository;
+    }
 
     @Override
     public void createAccount(PetDto petDto) {
@@ -27,14 +30,16 @@ public class PetServiceImpl implements IPetService {
             throw new PetAlreadyExistsException("Pet already registered with name: " + petDto.getName());
         }
         Pet pet = PetMapper.mapToPet(petDto, new Pet());
+        if (pet.getPetType() != null) {
+            pet.getPetType().setPrice(calculatePrice(pet.getPetType().getSpecies(), pet.getPetType().getBreed()));
+        }
         petRepository.save(pet);
     }
 
     @Override
     public PetDto fetchAccount(Long petId) {
         Pet pet = petRepository.findById(petId).orElseThrow(
-                () -> new ResourceNotFoundException("Pet", "petId", petId.toString())
-        );
+                () -> new ResourceNotFoundException("Pet", "petId", petId.toString()));
         return PetMapper.mapToPetDto(pet, new PetDto());
     }
 
@@ -49,9 +54,11 @@ public class PetServiceImpl implements IPetService {
     @Override
     public boolean updateAccount(PetDto petDto) {
         Pet pet = petRepository.findById(petDto.getPetId()).orElseThrow(
-                () -> new ResourceNotFoundException("Pet", "petId", petDto.getPetId().toString())
-        );
+                () -> new ResourceNotFoundException("Pet", "petId", petDto.getPetId().toString()));
         PetMapper.mapToPet(petDto, pet);
+        if (pet.getPetType() != null) {
+            pet.getPetType().setPrice(calculatePrice(pet.getPetType().getSpecies(), pet.getPetType().getBreed()));
+        }
         petRepository.save(pet);
         return true;
     }
@@ -59,9 +66,19 @@ public class PetServiceImpl implements IPetService {
     @Override
     public boolean deleteAccount(Long petId) {
         petRepository.findById(petId).orElseThrow(
-                () -> new ResourceNotFoundException("Pet", "petId", petId.toString())
-        );
+                () -> new ResourceNotFoundException("Pet", "petId", petId.toString()));
         petRepository.deleteById(petId);
         return true;
+    }
+
+    private Double calculatePrice(String species, String breed) {
+        double price = 100.0;
+        if (species != null) {
+            price += species.length() * 5.0;
+        }
+        if (breed != null) {
+            price += breed.length() * 10.0;
+        }
+        return price;
     }
 }

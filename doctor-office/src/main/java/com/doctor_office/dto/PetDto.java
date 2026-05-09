@@ -47,7 +47,31 @@ public class PetDto {
     private String medicalHistory;
 
     @Schema(
+            description = "Calculated price of the pet", example = "150.0"
+    )
+    private Double price;
+
+    @Schema(
             description = "Doctor Details of the pet"
     )
     private DoctorDto doctorDto;
+
+    public Long getPetId() { return petId; }
+    public void setPetId(Long petId) { this.petId = petId; }
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+    public String getSpecies() { return species; }
+    public void setSpecies(String species) { this.species = species; }
+    public String getBreed() { return breed; }
+    public void setBreed(String breed) { this.breed = breed; }
+    public Integer getAge() { return age; }
+    public void setAge(Integer age) { this.age = age; }
+    public Float getWeight() { return weight; }
+    public void setWeight(Float weight) { this.weight = weight; }
+    public String getMedicalHistory() { return medicalHistory; }
+    public void setMedicalHistory(String medicalHistory) { this.medicalHistory = medicalHistory; }
+    public Double getPrice() { return price; }
+    public void setPrice(Double price) { this.price = price; }
+    public DoctorDto getDoctorDto() { return doctorDto; }
+    public void setDoctorDto(DoctorDto doctorDto) { this.doctorDto = doctorDto; }
 }

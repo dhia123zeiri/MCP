@@ -5,9 +5,9 @@ spring:
   application:
     name: "DoctorOffice"
   datasource:
-    url: jdbc:postgresql://localhost:5433/doctor_office
+    url: jdbc:postgresql://database:5432/project3
     username: postgres
-    password: dhia
+    password: nopass
     driver-class-name: org.postgresql.Driver
   jpa:
     open-in-view: false
