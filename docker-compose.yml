@@ -1,0 +1,216 @@
+# ============================================================================
+# Doctor Office EAI — full stack: 3 KRaft Kafka brokers + Postgres + Connect
+# ============================================================================
+# Usage:
+#   docker compose up -d
+#   docker compose logs -f streams-app
+#
+# Brokers exposed on localhost:
+#   broker1 -> 9094
+#   broker2 -> 9095
+#   broker3 -> 9096
+# ============================================================================
+
+name: doctor-office-eai
+
+x-kafka-common: &kafka-common
+  image: apache/kafka:3.8.0
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+    interval: 10s
+    timeout: 10s
+    retries: 30
+
+x-kafka-env: &kafka-env
+  KAFKA_PROCESS_ROLES: broker,controller
+  KAFKA_CONTROLLER_QUORUM_VOTERS: "1@broker1:9093,2@broker2:9093,3@broker3:9093"
+  KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+  KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+  # Replication for *internal* topics (consumer offsets, txn log, etc.)
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+  KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+  KAFKA_MIN_INSYNC_REPLICAS: 2
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+  KAFKA_NUM_PARTITIONS: 3
+  CLUSTER_ID: 5L6g3nShT-eMCtK--X86sw
+
+services:
+
+  # --- Kafka cluster (KRaft, no Zookeeper) ----------------------------------
+
+  broker1:
+    <<: *kafka-common
+    container_name: broker1
+    hostname: broker1
+    ports: ["9094:9094"]
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENERS: CONTROLLER://:9093,INTERNAL://:9092,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://broker1:9092,EXTERNAL://localhost:9094
+
+  broker2:
+    <<: *kafka-common
+    container_name: broker2
+    hostname: broker2
+    ports: ["9095:9095"]
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 2
+      KAFKA_LISTENERS: CONTROLLER://:9093,INTERNAL://:9092,EXTERNAL://:9095
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://broker2:9092,EXTERNAL://localhost:9095
+
+  broker3:
+    <<: *kafka-common
+    container_name: broker3
+    hostname: broker3
+    ports: ["9096:9096"]
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 3
+      KAFKA_LISTENERS: CONTROLLER://:9093,INTERNAL://:9092,EXTERNAL://:9096
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://broker3:9092,EXTERNAL://localhost:9096
+
+  # --- Topic creation (one-shot) --------------------------------------------
+
+  topic-init:
+    image: apache/kafka:3.8.0
+    container_name: topic-init
+    depends_on:
+      broker1: { condition: service_healthy }
+      broker2: { condition: service_healthy }
+      broker3: { condition: service_healthy }
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        BS="broker1:9092,broker2:9092,broker3:9092"
+        create() { /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --create --if-not-exists --topic $$1 --partitions 3 --replication-factor 3 --config min.insync.replicas=2; }
+        create dbinfo.pettypes
+        create dbinfo.countries
+        create appointments
+        create supplies
+        for t in revenue-per-item expenses-per-item profit-per-item \
+                 total-revenue total-expenses total-profit \
+                 avg-per-appointment-by-item avg-per-appointment-all \
+                 top-profit-item \
+                 windowed-revenue windowed-expenses windowed-profit \
+                 top-country-per-item; do
+          create results.$$t
+        done
+        echo "--- topics ---"
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --list
+
+  # --- PostgreSQL -----------------------------------------------------------
+
+  database:
+    image: postgres:16
+    container_name: database
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: project3
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: nopass
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d project3"]
+      interval: 5s
+      retries: 20
+
+  # --- Kafka Connect (JDBC source + sink) -----------------------------------
+
+  connect:
+    image: confluentinc/cp-kafka-connect:7.7.0
+    container_name: connect
+    depends_on:
+      topic-init: { condition: service_completed_successfully }
+      database:   { condition: service_healthy }
+    ports: ["8083:8083"]
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: "broker1:9092,broker2:9092,broker3:9092"
+      CONNECT_REST_PORT: 8083
+      CONNECT_REST_ADVERTISED_HOST_NAME: connect
+      CONNECT_GROUP_ID: doctor-office-connect
+      CONNECT_CONFIG_STORAGE_TOPIC: _connect_configs
+      CONNECT_OFFSET_STORAGE_TOPIC: _connect_offsets
+      CONNECT_STATUS_STORAGE_TOPIC: _connect_status
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 3
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 3
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 3
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      CONNECT_PLUGIN_PATH: "/usr/share/java,/usr/share/confluent-hub-components,/connect-plugins"
+    volumes:
+      - ./kafka-connect/plugins:/connect-plugins:ro
+      - ./kafka-connect/configs:/connect-configs:ro
+    command:
+      - bash
+      - -c
+      - |
+        echo "Installing JDBC connector..."
+        confluent-hub install --no-prompt confluentinc/kafka-connect-jdbc:10.7.6
+        echo "Starting Connect..."
+        /etc/confluent/docker/run
+
+  # --- Doctor Office Spring Boot (REST + MCP) -------------------------------
+
+  doctor-office:
+    build: ./doctor-office
+    container_name: doctor-office
+    depends_on:
+      database: { condition: service_healthy }
+      topic-init: { condition: service_completed_successfully }
+    ports: ["8080:8080"]
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://database:5432/project3
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: nopass
+      KAFKA_BOOTSTRAP_SERVERS: broker1:9092,broker2:9092,broker3:9092
+
+  # --- Standalone producer: Customers (Appointments / Sales) ----------------
+
+  customers-app:
+    build: ./customers-app
+    container_name: customers-app
+    depends_on:
+      topic-init: { condition: service_completed_successfully }
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: broker1:9092,broker2:9092,broker3:9092
+      APPOINTMENTS_PER_SECOND: "2"
+      DETERMINISTIC_SEED: "42"
+
+  # --- Standalone producer: Suppliers (Supplies / Purchases) ----------------
+
+  suppliers-app:
+    build: ./suppliers-app
+    container_name: suppliers-app
+    depends_on:
+      topic-init: { condition: service_completed_successfully }
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: broker1:9092,broker2:9092,broker3:9092
+      SUPPLIES_PER_SECOND: "1"
+      DETERMINISTIC_SEED: "42"
+
+  # --- Standalone Kafka Streams metrics app ---------------------------------
+
+  streams-app:
+    build: ./streams-app
+    container_name: streams-app
+    depends_on:
+      topic-init: { condition: service_completed_successfully }
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: broker1:9092,broker2:9092,broker3:9092
+      APPLICATION_ID: doctor-office-metrics
+      WINDOW_DURATION_MINUTES: "1"
+
+volumes:
+  pgdata:

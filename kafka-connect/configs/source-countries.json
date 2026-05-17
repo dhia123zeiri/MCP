@@ -1,0 +1,21 @@
+{
+  "name": "jdbc-source-countries",
+  "config": {
+    "connector.class": "io.confluent.connect.jdbc.JdbcSourceConnector",
+    "tasks.max": "1",
+    "connection.url": "jdbc:postgresql://database:5432/project3",
+    "connection.user": "postgres",
+    "connection.password": "nopass",
+    "mode": "bulk",
+    "table.whitelist": "country",
+    "topic.prefix": "dbinfo.",
+    "poll.interval.ms": "30000",
+    "transforms": "ExtractKey",
+    "transforms.ExtractKey.type": "org.apache.kafka.connect.transforms.ValueToKey",
+    "transforms.ExtractKey.fields": "code",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter.schemas.enable": "false"
+  }
+}

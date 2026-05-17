@@ -1,0 +1,25 @@
+{
+  "name": "jdbc-source-pettypes",
+  "config": {
+    "connector.class": "io.confluent.connect.jdbc.JdbcSourceConnector",
+    "tasks.max": "1",
+    "connection.url": "jdbc:postgresql://database:5432/project3",
+    "connection.user": "postgres",
+    "connection.password": "nopass",
+    "mode": "incrementing",
+    "incrementing.column.name": "pet_type_id",
+    "table.whitelist": "pet_type",
+    "topic.prefix": "dbinfo.",
+    "poll.interval.ms": "10000",
+    "transforms": "RenameTopic,ExtractKey",
+    "transforms.RenameTopic.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.RenameTopic.regex": "dbinfo.pet_type",
+    "transforms.RenameTopic.replacement": "dbinfo.pettypes",
+    "transforms.ExtractKey.type": "org.apache.kafka.connect.transforms.ValueToKey",
+    "transforms.ExtractKey.fields": "pet_type_id",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter.schemas.enable": "false"
+  }
+}
