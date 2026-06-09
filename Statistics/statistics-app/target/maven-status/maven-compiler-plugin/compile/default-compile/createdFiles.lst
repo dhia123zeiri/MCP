@@ -1,0 +1,7 @@
+com/statistics/model/AppointmentRequest.class
+com/statistics/model/PurchaseItem.class
+com/statistics/model/StatisticsResult.class
+com/statistics/processor/StatsProcessor$1.class
+com/statistics/StatisticsApp$1.class
+com/statistics/processor/StatsProcessor.class
+com/statistics/StatisticsApp.class

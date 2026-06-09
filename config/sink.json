@@ -1,0 +1,18 @@
+{
+    "name": "jdbc-postgresql-sink",
+    "config": {
+        "connection.url": "jdbc:postgresql://database:5432/project3?user=postgres&password=nopass",
+        "connector.class": "io.confluent.connect.jdbc.JdbcSinkConnector",
+        "dialect.name": "PostgreSqlDatabaseDialect",
+        "tasks.max": "1",
+        "topics": "Proj3TripsCountPerRouteOutputStreamsTopic,Proj3ExpensesPerSockPairOutputStreamsTopic,Proj3ProfitPerSockPairOutputStreamsTopic,Proj3TotalRevenueOutputStreamsTopic,Proj3TotalExpensesOutputStreamsTopic,Proj3TotalProfitOutputStreamsTopic,Proj3AveragePurchasesPerKeyOutputStreamsTopic,Proj3AveragePurchasesAllKeysOutputStreamsTopic,Proj3HighestProfitOutputStreamsTopic,Proj3TotalRevenueWindowedOutputStreamsTopic,Proj3TotalExpensesWindowedOutputStreamsTopic,Proj3TotalProfitWindowedOutputStreamsTopic,Proj3SupplierHighestProfitSalesOutputStreamsTopic",
+        "auto.create": "true",
+        "insert.mode": "upsert",
+        "pk.mode": "record_value",
+        "pk.fields": "id",
+        "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+        "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+        "key.converter.schemas.enable": "true",
+        "value.converter.schemas.enable": "true"
+    }
+}
